@@ -117,7 +117,8 @@ type model struct {
 	gpuMiner   *gpu.Miner
 	gpuDevices []string
 
-	tmplState *templateState
+	tmplState  *templateState
+	pollTrigger chan struct{}
 }
 
 func hostname() string {
@@ -139,6 +140,7 @@ func initialModel() model {
 		startTime:   time.Now(),
 		count:       &sharedCount{},
 		tmplState:   &templateState{},
+		pollTrigger: make(chan struct{}, 1),
 	}
 	m.miningCtx, m.miningCancel = context.WithCancel(context.Background())
 	return m
@@ -184,11 +186,16 @@ func (m *model) runBenchLoop(ctx context.Context) {
 	})
 	hasher := newHasher(m.pers)
 
-	step := uint32(m.threads) * m.totalMiners
+	gpuSlots := uint32(0)
+	if m.gpuMiner != nil && m.gpuMiner.Available() {
+		gpuSlots = 1
+	}
+	slotsPerMiner := uint32(m.threads) + gpuSlots
+	step := slotsPerMiner * m.totalMiners
 	for w := 0; w < m.threads; w++ {
 		go func(start uint32) {
 			var buf [80]byte
-			for nonce := start + m.minerID; ; nonce += step {
+			for nonce := m.minerID*slotsPerMiner + start; ; nonce += step {
 				select {
 				case <-ctx.Done():
 					return
@@ -232,7 +239,10 @@ func (m *model) runGPUBenchLoop(ctx context.Context) {
 		Bits:      chaincfg.MainNet.PostGenesisBits,
 	}
 
-	nonce := m.minerID
+	gpuSlot := uint32(m.threads)
+	slotsPerMiner := gpuSlot + 1
+	step := slotsPerMiner * m.totalMiners
+	nonce := m.minerID*slotsPerMiner + gpuSlot
 	headers := make([][80]byte, batchSize)
 	for {
 		select {
@@ -244,7 +254,7 @@ func (m *model) runGPUBenchLoop(ctx context.Context) {
 		for i := range headers {
 			h := header
 			h.Nonce = nonce
-			nonce += m.totalMiners
+			nonce += step
 			b, _ := h.Bytes()
 			copy(headers[i][:], b)
 		}
@@ -292,11 +302,14 @@ func (m *model) runRPCGPULoop(ctx context.Context) {
 			continue
 		}
 
-		nonce := m.minerID
+		gpuSlot := uint32(m.threads)
+		slotsPerMiner := gpuSlot + 1
+		step := slotsPerMiner * m.totalMiners
+		nonce := m.minerID*slotsPerMiner + gpuSlot
 		for i := range headers {
 			copy(headers[i][:], base[:])
 			binary.LittleEndian.PutUint32(headers[i][76:], nonce)
-			nonce += m.totalMiners
+			nonce += step
 		}
 
 		results, err := gm.Hash(headers, m.pers)
@@ -331,6 +344,11 @@ func (m *model) runRPCGPULoop(ctx context.Context) {
 					}
 				} else {
 					m.accepted++
+				}
+
+				select {
+				case m.pollTrigger <- struct{}{}:
+				default:
 				}
 
 				select {
@@ -369,6 +387,7 @@ func (m *model) runRPCLoop(ctx context.Context) {
 			case <-pollCtx.Done():
 				return
 			case <-time.After(500 * time.Millisecond):
+			case <-m.pollTrigger:
 			}
 
 			tmpl, err := client.GetBlockTemplate(m.pubKeyHex)
@@ -444,9 +463,14 @@ func (m *model) runRPCLoop(ctx context.Context) {
 		default:
 		}
 
+		gpuSlots := uint32(0)
+		if m.gpuMiner != nil && m.gpuMiner.Available() {
+			gpuSlots = 1
+		}
+		slotsPerMiner := uint32(m.threads) + gpuSlots
 		hasher := newHasher(m.pers)
 		miningCtx, miningCancel := context.WithCancel(ctx)
-		nonce, ok := mineBlockHashed(hasher, base, bits, m.threads, miningCtx, &m.count.hashCount, m.minerID, m.totalMiners, &m.tmplState.stale)
+		nonce, ok := mineBlockHashed(hasher, base, bits, m.threads, miningCtx, &m.count.hashCount, m.minerID, m.totalMiners, slotsPerMiner, &m.tmplState.stale)
 		miningCancel()
 
 		if !ok {
@@ -480,6 +504,12 @@ func (m *model) runRPCLoop(ctx context.Context) {
 			m.accepted++
 		}
 
+		// Trigger immediate template poll — don't wait 500ms
+		select {
+		case m.pollTrigger <- struct{}{}:
+		default:
+		}
+
 		select {
 		case m.statsCh <- statsMsg{
 			found:    m.found,
@@ -497,20 +527,20 @@ func (m *model) runRPCLoop(ctx context.Context) {
 	}
 }
 
-func mineBlockHashed(hasher Hasher, base [80]byte, bits uint32, workers int, ctx context.Context, hashCount *atomic.Uint64, minerID, totalMiners uint32, stale *atomic.Bool) (uint32, bool) {
+func mineBlockHashed(hasher Hasher, base [80]byte, bits uint32, workers int, ctx context.Context, hashCount *atomic.Uint64, minerID, totalMiners, slotsPerMiner uint32, stale *atomic.Bool) (uint32, bool) {
 	type result struct {
 		nonce uint32
 	}
 	resc := make(chan result, 1)
 	var wg sync.WaitGroup
 
-	step := uint32(workers) * totalMiners
+	step := slotsPerMiner * totalMiners
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func(start uint32) {
 			defer wg.Done()
 			var buf [80]byte
-			for nonce := start + minerID; ; nonce += step {
+			for nonce := minerID*slotsPerMiner + start; ; nonce += step {
 				select {
 				case <-ctx.Done():
 					return
