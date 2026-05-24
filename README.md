@@ -6,6 +6,8 @@ in benchmark mode without a daemon.
 
 ### Quick Start
 
+#### Read HOWTO.md for how to build the legacycoin rpc daemon and the legacy-miner for best results.
+
 ```bash
 make                    # build (CGO + x86-64 ASM)
 ./legacy-miner          # benchmark mode (TUI)
@@ -29,10 +31,10 @@ make opencl            # AMD/Intel
 
 ### Documentation
 
-| File | Contents |
-|------|----------|
-| `HOWTO.md` | Full usage guide, tuning, multi-machine, GPU |
-| `PLAN.md` | Architecture, build targets, TODO, completed work |
+| File       | Contents                                          |
+| ---------- | ------------------------------------------------- |
+| `HOWTO.md` | Full usage guide, tuning, multi-machine, GPU      |
+| `PLAN.md`  | Architecture, build targets, TODO, completed work |
 
 ### Support
 
@@ -42,3 +44,7 @@ the following addresses:
 - **ETH/ERC20:** `0x968cC7D93c388614f620Ef812C5fdfe64029B92d`
 - **SOL:** `HB2o6q6vsW5796U5y7NxNqA7vYZW1vuQjpAHDo7FAMG8`
 - **BTC:** `bc1qkmzc6d49fl0edyeynezwlrfqv486nmk6p5pmta`
+- **LTC:** `ltc1q0ahxru7nwgey64agffr7x89swekj7sz8stqc6x`
+- **XRP:** `rUW7Q64vR4PwDM3F27etd6ipxK8MtuxsFs`
+
+Or buy me a coffe on https://buymeacoffee.com/timhbergsta or support me with paypal on *timh@tbtechvn.com*. 

@@ -1,72 +1,13 @@
-# Standalone CPU/GPU Miner for yespower 1.0 (LegacyCoin)
-
-## Build
-```bash
-make            # baseline CGO + x86-64 ASM
-make avx2       # enable AVX2 code path
-make native     # -march=native
-make purec      # pure C (no inline ASM)
-make pure       # pure-Go fallback
-make static     # static binary
-make cuda       # NVIDIA GPU (requires nvcc)
-make opencl     # AMD/Intel GPU (requires OpenCL runtime)
-```
-
-## Usage
-```bash
-./legacy-miner                                   # TUI bench
-./legacy-miner --config=miner.json               # from JSON config
-./legacy-miner --rpc=... --pubkeyhash=...        # RPC mining
-./legacy-miner --gpu                             # with GPU
-./legacy-miner --testnet                         # testnet params
-./legacy-miner --miner-id=0 --total-miners=4     # multi-instance
-```
-
-## TUI Controls
-- `b` — cycle bench / rpc / stratum
-- `+`/`-` — adjust CPU threads
-- `r` — restart mining
-- `q` — quit
-
-## Files
-```
-standalone-miner/
-├── Makefile              # cpu/avx2/native/purec/pure/static/cuda/opencl
-├── go.mod / go.sum
-├── main.go               # flags + config + TUI program start
-├── miner.go              # mineBlock, benchHashrate (legacy CLI)
-├── tui.go                # Bubble Tea model, view, update, loops
-├── sysmon.go             # /proc CPU + MEM
-├── rpc.go                # JSON-RPC 1.0 client
-├── pool.go               # Hasher interface
-├── HOWTO.md              # full usage guide
-├── PLAN.md               # this file
-├── gpu/                  # GPU mining package
-│   ├── gpu.go            # Miner interface (Hash, Init, Close)
-│   ├── gpu_cuda.go       # CUDA CGO bindings (tag: cuda)
-│   ├── gpu_opencl.go     # OpenCL CGO bindings (tag: opencl)
-│   ├── gpu_stub.go       # fallback when no GPU tag is set
-│   ├── bridge.h          # common C interface
-│   ├── cuda_bridge.cu    # CUDA kernel + host bridge (nvcc)
-│   ├── opencl_bridge.c   # OpenCL host bridge (gcc)
-│   └── yespower_kernel.cl # OpenCL kernel source
-└── internal/
-    ├── chainhash/        # Hash type
-    ├── chaincfg/         # MainNet / TestNet params
-    ├── consensus/        # CheckProofOfWork, CheckHashTarget (fast path)
-    ├── config/           # RPC cookie auth
-    ├── wire/             # BlockHeader (stripped)
-    └── pow/              # C yespower + PooledYespower
-```
-
-## Architecture
+# ## PLAN
 
 ### CPU Mining
+
 - Per-thread goroutines, one nonce per hash, TLS-scratch reuse
 - CGO backend: yespower-opt.c with x86-64 ASM pwxform
 - Fallback: PooledYespower (pure-Go, scratch reuse avoids 8 MB alloc)
 
 ### Multi-Instance Nonce Partitioning
+
 - `--miner-id=N --total-miners=M` splits the 32-bit nonce space into M
   disjoint partitions, each of size 2^32 / M.
 - Within each miner, CPU and GPU (if enabled) get separate slots so they
@@ -79,6 +20,7 @@ standalone-miner/
 - Validation: the miner exits with a clear error if `minerID >= totalMiners`.
 
 ### Template Pipeline
+
 - Background goroutine polls `getblocktemplate` every 500 ms, stores the
   latest block header in `tmplState`.
 - When a block is submitted, a `pollTrigger` channel signals the background
@@ -88,12 +30,14 @@ standalone-miner/
   multiple miners share one RPC endpoint.
 
 ### Fast PoW Check (Hot Path)
+
 - `CheckProofOfWork` (which allocates big.Int per hash) is called once per
   template to produce a `[32]byte` target via `TargetFromBits`.
 - The inner mining loop uses `CheckHashTarget`, which compares 32 bytes
   directly with no allocations — zero garbage per hash in the hot path.
 
 ### GPU Mining
+
 - CUDA or OpenCL backend, selected by build tag
 - One thread per nonce, ~8 MB scratch per thread in global memory
 - Batch size auto-sized to 80% of GPU free memory
@@ -103,33 +47,25 @@ standalone-miner/
 - TUI shows GPU devices when `--gpu` is active
 
 ### Config File
+
 - JSON file read before flag parsing; CLI flags override config values.
 - Supported keys: `rpc`, `pubkeyhash`, `threads`, `rpcuser`, `rpcpass`,
   `datadir`, `rig`, `gpu`, `miner_id`, `total_miners`, `testnet`.
 
 ## Performance
-| Variant | Single-thread | Notes |
-|---------|--------------|-------|
-| baseline (x86-64 ASM) | 27 H/s | i7-1265U |
-| avx2 | 21 H/s | throttles on laptop |
-| native | 26 H/s | — |
-| GPU (RTX 3060, est.) | ~100–300 H/s | depends on mem bandwidth |
 
-## TODO (Priority Order)
+| Variant               | Single-thread | Notes                    |
+| --------------------- | ------------- | ------------------------ |
+| baseline (x86-64 ASM) | 27 H/s        | i7-1265U                 |
+| avx2                  | 21 H/s        | throttles on laptop      |
+| native                | 26 H/s        | —                        |
+| GPU (RTX 3060, est.)  | ~100–300 H/s  | depends on mem bandwidth |
+
+## TODO
+
 1. Stratum protocol client (press `b` in TUI to switch)
-2. ~~Persistent config file (`--config`)~~ ✓ done
-3. Windows/macOS system resource monitoring (non-Linux `/proc`)
-4. GPU kernel optimization (shared memory pwxform, warp-cooperative SMix)
-5. CPU auto-detect: `make detect` target that reads `/proc/cpuinfo` and
+2. Windows/macOS system resource monitoring (non-Linux `/proc`)
+3. GPU kernel optimization (shared memory pwxform, warp-cooperative SMix)
+4. CPU auto-detect: `make detect` target that reads `/proc/cpuinfo` and
    recommends optimal CGO_CFLAGS
-6. ~~Batch multi-block RPC mining (pipeline getblocktemplate across submits)~~ ✓ done (poll trigger)
-7. ASUS/PCIe reset recovery for GPU hangs
-
-### Completed
-- ✓ Nonce stride fix — partition disjoint ranges across miners
-- ✓ CPU/GPU slot isolation within same process
-- ✓ Template poll trigger — immediate re-fetch after submit
-- ✓ `big.Int`-free PoW check in hot path
-- ✓ `--config` flag for JSON config file
-- ✓ `--testnet` flag for testnet params
-- ✓ Validation: `minerID < totalMiners`
+5. ASUS/PCIe reset recovery for GPU hangs
