@@ -19,6 +19,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var version = "dev"
+
 type minerFileConfig struct {
 	RPC         string `json:"rpc,omitempty"`
 	PubKeyHash  string `json:"pubkeyhash,omitempty"`
@@ -50,7 +52,7 @@ func loadMinerConfig(path string) *minerFileConfig {
 
 func init() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "LegacyCoin Standalone CPU Miner v1.0\n")
+		fmt.Fprintf(os.Stderr, "LegacyCoin Standalone CPU Miner %s\n", version)
 		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\n")
