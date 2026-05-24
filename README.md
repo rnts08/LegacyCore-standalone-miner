@@ -47,4 +47,4 @@ the following addresses:
 - **LTC:** `ltc1q0ahxru7nwgey64agffr7x89swekj7sz8stqc6x`
 - **XRP:** `rUW7Q64vR4PwDM3F27etd6ipxK8MtuxsFs`
 
-Or buy me a coffe on https://buymeacoffee.com/timhbergsta or support me with paypal on *timh@tbtechvn.com*. 
+You can also buy me a coffe on https://buymeacoffee.com/timhbergsta, support me with Ko-Fi https://ko-fi.com/rnts08 or simply send any tips to *timh@tbtechvn.com* via PayPal. 
