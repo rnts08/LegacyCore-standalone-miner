@@ -93,7 +93,7 @@ __device__ void hmac_sha256_d(const uint8_t *key, size_t klen,
     uint8_t tmp[128]; memcpy(tmp,buf,64); size_t r=64;
     while (inlen>=64-r) { memcpy(tmp+r,in,64-r); sha256_transform_d(st,tmp); in+=64-r; inlen-=64-r; r=0; }
     memcpy(tmp+r,in,inlen); r+=inlen; tmp[r]=0x80;
-    pad=(r<56)?(56-r):(64-r+56); memset(tmp+r+1,0,pad); le64enc_d(tmp+56,bl);
+    size_t pad=(r<56)?(56-r):(64-r+56); memset(tmp+r+1,0,pad); le64enc_d(tmp+56,bl);
     sha256_transform_d(st,tmp); if (r>=56) { memset(tmp,0,56); le64enc_d(tmp+56,bl); sha256_transform_d(st,tmp); }
     for (int i=0;i<8;i++) le32enc_d(ihash+i*4,st[i]);
     for (int i=0;i<64;i++) buf[i]=k[i]^0x5c;

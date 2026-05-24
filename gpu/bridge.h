@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Initialize GPU device.  Returns number of devices found, or -1 on error. */
 int gpu_init(void);
 
@@ -29,5 +33,9 @@ void gpu_close(void);
 
 /* Maximum batch size (limited by GPU memory).  Set by gpu_init(). */
 extern int gpu_max_batch;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* GPU_BRIDGE_H */
