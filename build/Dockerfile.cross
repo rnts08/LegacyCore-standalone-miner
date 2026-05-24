@@ -4,6 +4,7 @@ FROM golang:1.25-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     gcc-aarch64-linux-gnu \
+    libc6-dev-arm64-cross \
     gcc-mingw-w64-x86-64 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
