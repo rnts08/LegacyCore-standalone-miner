@@ -1,3 +1,4 @@
 .opencode
 legacy-miner
 build/
+!build/Dockerfile.cross
