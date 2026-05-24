@@ -122,3 +122,30 @@ func CheckProofOfWork(hash chainhash.Hash, bits uint32) error {
 	}
 	return nil
 }
+
+// TargetFromBits converts compact bits to a 32-byte big-endian target
+// suitable for CheckHashTarget.  Uses CompactToBig once (caller caches result).
+func TargetFromBits(bits uint32) [32]byte {
+	var target [32]byte
+	bigTarget := CompactToBig(bits)
+	b := bigTarget.Bytes()
+	copy(target[32-len(b):], b)
+	return target
+}
+
+// CheckHashTarget compares a hash against a pre-computed 32-byte target
+// without allocating any big.Int values.  Caller computes TargetFromBits once.
+//
+// hash[31] is the most significant byte (HashToBig reverses internally),
+// target[0] is the most significant byte (big-endian from CompactToBig).
+func CheckHashTarget(hash chainhash.Hash, target *[32]byte) error {
+	for i := 0; i < 32; i++ {
+		if hash[31-i] < target[i] {
+			return nil
+		}
+		if hash[31-i] > target[i] {
+			return ErrHighHash
+		}
+	}
+	return nil
+}

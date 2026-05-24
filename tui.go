@@ -80,6 +80,7 @@ type templateState struct {
 type model struct {
 	rigName string
 	pers    string
+	postGenesisBits uint32
 	backend string
 
 	mode       modeType
@@ -129,9 +130,10 @@ func hostname() string {
 func initialModel() model {
 	pers := chaincfg.MainNet.YespowerPers
 	m := model{
-		rigName:     hostname(),
-		pers:        pers,
-		backend:     pow.BackendName(),
+		rigName:         hostname(),
+		pers:            pers,
+		postGenesisBits: chaincfg.MainNet.PostGenesisBits,
+		backend:         pow.BackendName(),
 		mode:        modeBench,
 		threads:     runtime.NumCPU(),
 		totalMiners: 1,
@@ -178,7 +180,7 @@ func (m *model) startMining() {
 }
 
 func (m *model) runBenchLoop(ctx context.Context) {
-	bits := chaincfg.MainNet.PostGenesisBits
+	bits := m.postGenesisBits
 	base := serializeHeader(wire.BlockHeader{
 		Version:   1,
 		Bits:      bits,
@@ -236,7 +238,7 @@ func (m *model) runGPUBenchLoop(ctx context.Context) {
 		Version:   1,
 		PrevBlock: [32]byte{},
 		Timestamp: uint32(time.Now().Unix()),
-		Bits:      chaincfg.MainNet.PostGenesisBits,
+		Bits:      m.postGenesisBits,
 	}
 
 	gpuSlot := uint32(m.threads)
@@ -468,9 +470,10 @@ func (m *model) runRPCLoop(ctx context.Context) {
 			gpuSlots = 1
 		}
 		slotsPerMiner := uint32(m.threads) + gpuSlots
+		target := consensus.TargetFromBits(bits)
 		hasher := newHasher(m.pers)
 		miningCtx, miningCancel := context.WithCancel(ctx)
-		nonce, ok := mineBlockHashed(hasher, base, bits, m.threads, miningCtx, &m.count.hashCount, m.minerID, m.totalMiners, slotsPerMiner, &m.tmplState.stale)
+		nonce, ok := mineBlockHashed(hasher, base, target, m.threads, miningCtx, &m.count.hashCount, m.minerID, m.totalMiners, slotsPerMiner, &m.tmplState.stale)
 		miningCancel()
 
 		if !ok {
@@ -527,7 +530,7 @@ func (m *model) runRPCLoop(ctx context.Context) {
 	}
 }
 
-func mineBlockHashed(hasher Hasher, base [80]byte, bits uint32, workers int, ctx context.Context, hashCount *atomic.Uint64, minerID, totalMiners, slotsPerMiner uint32, stale *atomic.Bool) (uint32, bool) {
+func mineBlockHashed(hasher Hasher, base [80]byte, target [32]byte, workers int, ctx context.Context, hashCount *atomic.Uint64, minerID, totalMiners, slotsPerMiner uint32, stale *atomic.Bool) (uint32, bool) {
 	type result struct {
 		nonce uint32
 	}
@@ -556,7 +559,7 @@ func mineBlockHashed(hasher Hasher, base [80]byte, bits uint32, workers int, ctx
 					continue
 				}
 				hashCount.Add(1)
-				if consensus.CheckProofOfWork(hash, bits) == nil {
+				if consensus.CheckHashTarget(hash, &target) == nil {
 					select {
 					case resc <- result{nonce}:
 					default:

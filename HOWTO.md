@@ -97,7 +97,35 @@ Example:
 
 # With GPU (if built with CUDA or OpenCL support)
 ./legacy-miner --gpu
+
+# From JSON config file
+./legacy-miner --config=miner.json
+
+# Testnet
+./legacy-miner --testnet --rpc=http://localhost:19656 --pubkeyhash=<hex>
 ```
+
+### Multi-Instance (Nonce Partitioning)
+
+Run multiple miner processes against the same daemon without duplicating work:
+
+```bash
+# Terminal 1 — miner 0 of 4
+./legacy-miner --config=miner0.json
+
+# Terminal 2 — miner 1 of 4
+./legacy-miner --config=miner1.json
+
+# Terminal 3 — miner 2 of 4
+./legacy-miner --config=miner2.json
+
+# Terminal 4 — miner 3 of 4
+./legacy-miner --config=miner3.json
+```
+
+Each miner gets a disjoint slice of the 32-bit nonce space.  CPU threads
+and GPU (if enabled) within the same process also get separate slots so
+they never compete.
 
 ### TUI Layout
 
@@ -132,6 +160,7 @@ Example:
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--config <path>` | — | JSON config file (defaults for all flags) |
 | `--rpc <url>` | — | RPC URL for solo mining |
 | `--pubkeyhash <hex>` | — | 40-hex-char public key hash |
 | `--threads <n>` | all CPUs | CPU thread count |
@@ -140,12 +169,42 @@ Example:
 | `--datadir <path>` | ~/.legacycoin | Data dir for cookie auth |
 | `--rig <name>` | hostname | Rig name in TUI |
 | `--gpu` | false | Enable GPU mining |
+| `--miner-id <n>` | 0 | Miner index for multi-instance nonce partitioning (0-based) |
+| `--total-miners <n>` | 1 | Total number of miner instances sharing nonce space |
+| `--testnet` | false | Use testnet parameters (pers, bits, RPC port 19656) |
 
 ---
 
-## 5. CPU Tuning
+## 5. Config File
 
-### 5.1 How yespower Uses the CPU
+A JSON config file sets flag defaults.  CLI flags override config values.
+Example `miner.json`:
+
+```json
+{
+  "rpc": "http://192.168.1.100:19556",
+  "pubkeyhash": "a3f1c8d2e5b7a9c0d1e2f3a4b5c6d7e8f9a0b1c2",
+  "threads": 8,
+  "rig": "miner1",
+  "gpu": false,
+  "miner_id": 0,
+  "total_miners": 4,
+  "testnet": false
+}
+```
+
+Supported keys: `rpc`, `pubkeyhash`, `threads`, `rpcuser`, `rpcpass`,
+`datadir`, `rig`, `gpu`, `miner_id`, `total_miners`, `testnet`.
+
+**Tip for multi-instance:** create one JSON file per miner, varying only
+`rig`, `miner_id`, and optionally `threads`.  Then launch with
+`--config=minerN.json`.
+
+---
+
+## 6. CPU Tuning
+
+### 6.1 How yespower Uses the CPU
 
 Yespower 1.0 is memory-hard (~8 MB scratch per hash). The dominant cost
 is the `pwxform` S-box lookup loop, which is heavily pointer-chasing.
@@ -158,7 +217,7 @@ The reference C code provides three code paths, selected by compiler flags:
 | AVX/AVX2 SIMD | `-mavx2` | Mixed — helps Salsa20 but prefixes hurt pwxform |
 | AVX-512 | `-mavx512vl` | Best on server SKUs with AVX-512VL |
 
-### 5.2 Detect Your CPU Features
+### 6.2 Detect Your CPU Features
 
 ```bash
 # See what your CPU supports
@@ -170,7 +229,7 @@ grep flags /proc/cpuinfo | head -1
 #   sse4_1     → baseline (always present on x86-64)
 ```
 
-### 5.3 Make Targets
+### 6.3 Make Targets
 
 ```bash
 make               # baseline — x86-64 ASM + SSE2
@@ -184,7 +243,7 @@ CGO_CFLAGS="-mavx512vl" make              # Intel Ice Lake+ / AMD Zen 4
 CGO_CFLAGS="-march=native -O3" make       # aggressive native tuning
 ```
 
-### 5.4 Microarchitecture Guide
+### 6.4 Microarchitecture Guide
 
 | CPU Family | Recommended Flags | Expected vs Baseline |
 |------------|-------------------|---------------------|
@@ -199,7 +258,7 @@ CGO_CFLAGS="-march=native -O3" make       # aggressive native tuning
 | AMD Zen 4 (Genoa/Bergamo) | `CGO_CFLAGS="-mavx512vl"` | 1.2–1.4× |
 | ARM (Apple M1/M2, Graviton) | `CGO_CFLAGS="-DNO_X86_64_ASM"` | N/A — pure C path |
 
-### 5.5 Benchmark All Variants
+### 6.5 Benchmark All Variants
 
 ```bash
 make bench-cpu         # baseline
@@ -210,7 +269,7 @@ make bench-purec       # pure C (no ASM)
 
 Each will build with that flag, run for a few seconds, and print the hashrate.
 
-### 5.6 Performance Data (i7-1265U Alder Lake)
+### 6.6 Performance Data (i7-1265U Alder Lake)
 
 | Build | Single-thread | Notes |
 |-------|---------------|-------|
@@ -223,23 +282,23 @@ faster than baseline. **Always bench your own hardware.**
 
 ---
 
-## 6. GPU Mining
+## 7. GPU Mining
 
-### 6.1 Architecture
+### 7.1 Architecture
 
 Yespower 1.0 requires ~8 MB of scratch memory per hash attempt.
 Each GPU thread processes one nonce independently with scratch in
 global memory. Batch size is auto-sized to 80% of available GPU memory
 (~800 threads on an 8 GB card).
 
-### 6.2 Supported Backends
+### 7.2 Supported Backends
 
 | Backend | GPU | Build Command |
 |---------|-----|---------------|
 | CUDA | NVIDIA (sm_61+, compute 6.1+) | `make cuda` |
 | OpenCL | AMD, Intel, NVIDIA | `make opencl` |
 
-### 6.3 Prerequisites
+### 7.3 Prerequisites
 
 **CUDA:**
 ```bash
@@ -261,7 +320,7 @@ which clinfo || apt install clinfo opencl-headers  # Debian/Ubuntu
 make opencl
 ```
 
-### 6.4 Running with GPU
+### 7.4 Running with GPU
 
 ```bash
 # Benchmark mode with GPU
@@ -284,7 +343,7 @@ backend: cgo-c-reference + GPU[GeForce RTX 3060]
 GPU threads run alongside CPU threads — both contribute to the
 hashrate. Use `+`/`-` to adjust CPU threads independently.
 
-### 6.5 GPU Performance Expectations
+### 7.5 GPU Performance Expectations
 
 The memory-hard nature of yespower (~8 MB scratch per hash, heavy
 random-access S-box lookups) limits GPU throughput on most cards.
@@ -301,7 +360,7 @@ The primary bottleneck is global memory bandwidth.
 Actual performance depends on memory bandwidth, PCIe generation, and
 driver overhead. **Benchmark with `--gpu` on your hardware.**
 
-### 6.6 Troubleshooting (GPU)
+### 7.6 Troubleshooting (GPU)
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
@@ -313,30 +372,48 @@ driver overhead. **Benchmark with `--gpu` on your hardware.**
 
 ---
 
-## 7. Multi-Machine (Distributed) Mining
+## 8. Multi-Machine (Distributed) Mining
 
-Point multiple miners at the same daemon RPC endpoint:
+Point multiple miners at the same daemon RPC endpoint.  Each miner must
+have a unique `--miner-id` in `[0, totalMiners-1]`:
 
 ```bash
-# Miner 1
-./legacy-miner --rig=miner1 --rpc=http://192.168.1.100:19556 --pubkeyhash=<hex>
+# Miner 0 of 4
+./legacy-miner \
+  --rig=miner0 \
+  --miner-id=0 --total-miners=4 \
+  --rpc=http://192.168.1.100:19556 --pubkeyhash=<hex>
 
-# Miner 2
-./legacy-miner --rig=miner2 --rpc=http://192.168.1.100:19556 --pubkeyhash=<hex>
+# Miner 1 of 4
+./legacy-miner \
+  --rig=miner1 \
+  --miner-id=1 --total-miners=4 \
+  --rpc=http://192.168.1.100:19556 --pubkeyhash=<hex>
 ```
 
-Each miner calls `getblocktemplate` independently, searches a different
-nonce range, and submits when found. Only the first to submit wins.
+Or use config files for cleaner management:
+
+```bash
+# miner0.json — edit rig, miner_id per instance
+./legacy-miner --config=miner0.json
+./legacy-miner --config=miner1.json
+```
+
+Each miner calls `getblocktemplate` independently, searches a disjoint
+nonce range, and submits when found.  After submission the background
+template poller is triggered immediately (no 500 ms wait).  The hot-path
+PoW check uses direct byte comparison instead of big.Int allocation.
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `connection refused` | Daemon not running | Start legacywallet, verify `rpcbind` |
 | `RPC error -32603` | Daemon not ready | Wait for sync |
 | `pubkeyhash not mine` | Wrong wallet | Use address from this wallet |
+| `miner-id must be less than total-miners` | Bad config | Ensure `miner-id < total-miners` |
 | Hashrate drops | Thermal throttling | Reduce threads, improve cooling |
 | `could not open a new TTY` | Non-interactive | Use real terminal or `ssh -t` |
 | C compilation errors | Missing C compiler | Install `build-essential` / Xcode CLI |

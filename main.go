@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -18,6 +19,35 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type minerFileConfig struct {
+	RPC         string `json:"rpc,omitempty"`
+	PubKeyHash  string `json:"pubkeyhash,omitempty"`
+	Threads     int    `json:"threads,omitempty"`
+	RPCUser     string `json:"rpcuser,omitempty"`
+	RPCPass     string `json:"rpcpass,omitempty"`
+	DataDir     string `json:"datadir,omitempty"`
+	Rig         string `json:"rig,omitempty"`
+	GPU         *bool  `json:"gpu,omitempty"`
+	MinerID     *uint  `json:"miner_id,omitempty"`
+	TotalMiners *uint  `json:"total_miners,omitempty"`
+	Testnet     *bool  `json:"testnet,omitempty"`
+}
+
+func loadMinerConfig(path string) *minerFileConfig {
+	if path == "" {
+		return &minerFileConfig{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return &minerFileConfig{}
+	}
+	var cfg minerFileConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: ignoring invalid config file %s: %v\n", path, err)
+	}
+	return &cfg
+}
+
 func init() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "LegacyCoin Standalone CPU Miner v1.0\n")
@@ -28,8 +58,12 @@ func init() {
 		fmt.Fprintf(os.Stderr, "  (no flags)       Start TUI in benchmark mode\n")
 		fmt.Fprintf(os.Stderr, "  --rpc <url>      Start TUI in RPC mining mode\n")
 		fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "Config:\n")
+		fmt.Fprintf(os.Stderr, "  --config <path>      JSON config file (defaults for all flags)\n")
+		fmt.Fprintf(os.Stderr, "  --testnet            Use testnet params (pers, bits, port)\n")
+		fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "RPC mining flags:\n")
-		fmt.Fprintf(os.Stderr, "  --rpc <url>          RPC URL (default http://localhost:19556)\n")
+		fmt.Fprintf(os.Stderr, "  --rpc <url>          RPC URL  (default http://localhost:19556)\n")
 		fmt.Fprintf(os.Stderr, "  --pubkeyhash <hex>   Your 40-hex-char public key hash for coinbase\n")
 		fmt.Fprintf(os.Stderr, "  --threads <n>        Number of mining threads (default: all CPUs)\n")
 		fmt.Fprintf(os.Stderr, "  --rpcuser <user>     RPC username (optional, cookie auth by default)\n")
@@ -61,20 +95,62 @@ func init() {
 }
 
 func main() {
-	rpcURL := flag.String("rpc", "", "")
-	rpcUser := flag.String("rpcuser", "", "")
-	rpcPass := flag.String("rpcpass", "", "")
-	dataDir := flag.String("datadir", "", "")
-	pubKeyHash := flag.String("pubkeyhash", "", "")
-	threads := flag.Int("threads", runtime.NumCPU(), "")
-	rig := flag.String("rig", "", "")
-	gpuEnable := flag.Bool("gpu", false, "Enable GPU mining (if available)")
-	minerID := flag.Uint("miner-id", 0, "Miner index for multi-instance nonce partitioning (0-based)")
-	totalMiners := flag.Uint("total-miners", 1, "Total number of miner instances sharing nonce space")
+	configPath := ""
+	for i, arg := range os.Args[1:] {
+		if arg == "--config" && i+2 < len(os.Args) {
+			configPath = os.Args[i+2]
+			break
+		}
+		if strings.HasPrefix(arg, "--config=") {
+			configPath = arg[len("--config="):]
+			break
+		}
+	}
+
+	cfg := loadMinerConfig(configPath)
+
+	cfgThreads := cfg.Threads
+	if cfgThreads <= 0 {
+		cfgThreads = runtime.NumCPU()
+	}
+	cfgTotalMiners := uint(1)
+	if cfg.TotalMiners != nil && *cfg.TotalMiners > 0 {
+		cfgTotalMiners = *cfg.TotalMiners
+	}
+	cfgMinerID := uint(0)
+	if cfg.MinerID != nil {
+		cfgMinerID = *cfg.MinerID
+	}
+	cfgGPU := false
+	if cfg.GPU != nil {
+		cfgGPU = *cfg.GPU
+	}
+	cfgTestnet := false
+	if cfg.Testnet != nil {
+		cfgTestnet = *cfg.Testnet
+	}
+
+	flag.String("config", configPath, "Path to JSON config file")
+	rpcURL := flag.String("rpc", cfg.RPC, "")
+	rpcUser := flag.String("rpcuser", cfg.RPCUser, "")
+	rpcPass := flag.String("rpcpass", cfg.RPCPass, "")
+	dataDir := flag.String("datadir", cfg.DataDir, "")
+	pubKeyHash := flag.String("pubkeyhash", cfg.PubKeyHash, "")
+	threads := flag.Int("threads", cfgThreads, "")
+	rig := flag.String("rig", cfg.Rig, "")
+	gpuEnable := flag.Bool("gpu", cfgGPU, "Enable GPU mining (if available)")
+	minerID := flag.Uint("miner-id", cfgMinerID, "Miner index for multi-instance nonce partitioning (0-based)")
+	totalMiners := flag.Uint("total-miners", cfgTotalMiners, "Total number of miner instances sharing nonce space")
+	testnet := flag.Bool("testnet", cfgTestnet, "Use testnet parameters")
 	flag.Parse()
 
 	if *threads < 1 {
 		*threads = 1
+	}
+
+	if *minerID >= *totalMiners {
+		fmt.Fprintf(os.Stderr, "ERROR: --miner-id (%d) must be less than --total-miners (%d)\n", *minerID, *totalMiners)
+		os.Exit(1)
 	}
 
 	if *rpcURL != "" && *pubKeyHash == "" {
@@ -96,6 +172,10 @@ func main() {
 	}
 
 	m := initialModel()
+	if *testnet {
+		m.pers = chaincfg.TestNet.YespowerPers
+		m.postGenesisBits = chaincfg.TestNet.PostGenesisBits
+	}
 	m.threads = *threads
 	m.minerID = uint32(*minerID)
 	m.totalMiners = uint32(*totalMiners)
