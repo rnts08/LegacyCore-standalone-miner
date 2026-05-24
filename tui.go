@@ -115,8 +115,13 @@ type model struct {
 	miningCancel context.CancelFunc
 	statsCh      chan statsMsg
 
-	gpuMiner   *gpu.Miner
-	gpuDevices []string
+	gpuMiner    *gpu.Miner
+	gpuDevices  []string
+	gpuName     string
+	gpuCount    atomic.Uint64
+	gpuHashPrev uint64
+	gpuHistory  []float64
+	gpuActive   atomic.Bool
 
 	tmplState  *templateState
 	pollTrigger chan struct{}
@@ -138,6 +143,7 @@ func initialModel() model {
 		threads:     runtime.NumCPU(),
 		totalMiners: 1,
 		history:     make([]float64, 0, maxHist),
+		gpuHistory:  make([]float64, 0, maxHist),
 		statsCh:     make(chan statsMsg, 64),
 		startTime:   time.Now(),
 		count:       &sharedCount{},
@@ -156,6 +162,9 @@ func (m *model) startMining() {
 	m.count.hashCount.Store(0)
 	m.hashPrev = 0
 	m.history = m.history[:0]
+	m.gpuCount.Store(0)
+	m.gpuHashPrev = 0
+	m.gpuHistory = m.gpuHistory[:0]
 	m.lastStat = time.Now()
 
 	go func() {
@@ -230,6 +239,9 @@ func serializeHeader(h wire.BlockHeader) (out [80]byte) {
 
 func (m *model) runGPUBenchLoop(ctx context.Context) {
 	gm := m.gpuMiner
+	if gm == nil {
+		return
+	}
 	batchSize := gm.MaxBatch()
 	if batchSize < 1 {
 		batchSize = 256
@@ -246,6 +258,7 @@ func (m *model) runGPUBenchLoop(ctx context.Context) {
 	step := slotsPerMiner * m.totalMiners
 	nonce := m.minerID*slotsPerMiner + gpuSlot
 	headers := make([][80]byte, batchSize)
+	m.gpuActive.Store(true)
 	for {
 		select {
 		case <-ctx.Done():
@@ -263,15 +276,20 @@ func (m *model) runGPUBenchLoop(ctx context.Context) {
 
 		_, err := gm.Hash(headers, m.pers)
 		if err != nil {
+			m.gpuActive.Store(false)
 			time.Sleep(time.Second)
 			continue
 		}
-		m.count.hashCount.Add(uint64(batchSize))
+		m.gpuActive.Store(true)
+		m.gpuCount.Add(uint64(batchSize))
 	}
 }
 
 func (m *model) runRPCGPULoop(ctx context.Context) {
 	gm := m.gpuMiner
+	if gm == nil {
+		return
+	}
 	batchSize := gm.MaxBatch()
 	if batchSize < 1 {
 		batchSize = 256
@@ -282,6 +300,7 @@ func (m *model) runRPCGPULoop(ctx context.Context) {
 		return
 	}
 
+	m.gpuActive.Store(true)
 	for {
 		select {
 		case <-ctx.Done():
@@ -316,6 +335,7 @@ func (m *model) runRPCGPULoop(ctx context.Context) {
 
 		results, err := gm.Hash(headers, m.pers)
 		if err != nil {
+			m.gpuActive.Store(false)
 			select {
 			case <-time.After(time.Second):
 			case <-ctx.Done():
@@ -323,8 +343,8 @@ func (m *model) runRPCGPULoop(ctx context.Context) {
 			}
 			continue
 		}
-
-		m.count.hashCount.Add(uint64(batchSize))
+		m.gpuActive.Store(true)
+		m.gpuCount.Add(uint64(batchSize))
 
 		for i, hash := range results {
 			if consensus.CheckProofOfWork(chainhash.Hash(hash), bits) == nil {
@@ -614,11 +634,24 @@ func updateHashrate(m *model) {
 	current := m.count.hashCount.Load()
 	rate := float64(current-m.hashPrev) / elapsed
 	m.hashPrev = current
+
+	gpuCurrent := m.gpuCount.Load()
+	gpuRate := float64(gpuCurrent-m.gpuHashPrev) / elapsed
+	m.gpuHashPrev = gpuCurrent
+
 	m.lastStat = now
 
 	m.history = append(m.history, rate)
 	if len(m.history) > maxHist {
 		m.history = m.history[len(m.history)-maxHist:]
+	}
+	if m.gpuMiner != nil && m.gpuMiner.Available() {
+		m.gpuHistory = append(m.gpuHistory, gpuRate)
+		if len(m.gpuHistory) > maxHist {
+			m.gpuHistory = m.gpuHistory[len(m.gpuHistory)-maxHist:]
+		}
+	} else {
+		m.gpuHistory = m.gpuHistory[:0]
 	}
 }
 
@@ -794,6 +827,16 @@ func (m model) View() string {
 	spark := sparkline(m.history, 48)
 	rateStr := fmtHashrate(curRate)
 
+	gpuRate := 0.0
+	gpuSparkStr := ""
+	gpuRateStr := ""
+	hasGPU := m.gpuMiner != nil && m.gpuMiner.Available()
+	if hasGPU && len(m.gpuHistory) > 0 {
+		gpuRate = m.gpuHistory[len(m.gpuHistory)-1]
+		gpuSparkStr = sparkline(m.gpuHistory, 20)
+		gpuRateStr = fmtHashrate(gpuRate)
+	}
+
 	var modeInfo string
 	switch m.mode {
 	case modeBench:
@@ -818,17 +861,36 @@ func (m model) View() string {
 
 	b.WriteString("┌" + strings.Repeat("─", width-2) + "┐\n")
 	b.WriteString(boxLine(
-		styleTitle.Render("LegacyCoin CPU Miner")+"  —  "+styleLabel.Render(m.rigName),
+		styleTitle.Render("LegacyCoin Miner")+"  —  "+styleLabel.Render(m.rigName),
 		width,
 	))
 	b.WriteString("\n")
 	b.WriteString("│" + strings.Repeat("─", width-2) + "│\n")
 
-	b.WriteString(boxLine(
-		fmt.Sprintf("sparkline: %s  %s", spark, rateStr),
-		width,
-	))
-	b.WriteString("\n")
+	if hasGPU {
+		b.WriteString(boxLine(
+			fmt.Sprintf("CPU sparkline: %s  %s", spark, rateStr),
+			width,
+		))
+		b.WriteString("\n")
+
+		gpuActiveStr := "ACTIVE"
+		if !m.gpuActive.Load() {
+			gpuActiveStr = "IDLE"
+		}
+		gpuInfo := fmt.Sprintf("%s  %s", m.gpuName, gpuActiveStr)
+		b.WriteString(boxLine(
+			fmt.Sprintf("GPU sparkline: %s  %s  [%s]", gpuSparkStr, gpuRateStr, styleLabel.Render(gpuInfo)),
+			width,
+		))
+		b.WriteString("\n")
+	} else {
+		b.WriteString(boxLine(
+			fmt.Sprintf("sparkline: %s  %s", spark, rateStr),
+			width,
+		))
+		b.WriteString("\n")
+	}
 
 	backendStr := m.backend
 	if len(m.gpuDevices) > 0 {

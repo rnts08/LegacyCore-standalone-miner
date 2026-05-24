@@ -200,6 +200,9 @@ func main() {
 			for _, d := range gm.Devices() {
 				m.gpuDevices = append(m.gpuDevices, d.Name)
 			}
+			if len(m.gpuDevices) > 0 {
+				m.gpuName = m.gpuDevices[0]
+			}
 		}
 	}
 
