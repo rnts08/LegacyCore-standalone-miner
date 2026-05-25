@@ -1,71 +1,115 @@
-# ## PLAN
+# Future Plans
 
-### CPU Mining
+## Stratum Protocol Client
 
-- Per-thread goroutines, one nonce per hash, TLS-scratch reuse
-- CGO backend: yespower-opt.c with x86-64 ASM pwxform
-- Fallback: PooledYespower (pure-Go, scratch reuse avoids 8 MB alloc)
+The TUI has a stratum mode slot (`[b]` cycles bench → rpc → stratum) but
+no implementation yet. Stratum would allow pooled mining instead of solo
+RPC, reducing variance and providing steady payouts.
 
-### Multi-Instance Nonce Partitioning
+### Design considerations
 
-- `--miner-id=N --total-miners=M` splits the 32-bit nonce space into M
-  disjoint partitions, each of size 2^32 / M.
-- Within each miner, CPU and GPU (if enabled) get separate slots so they
-  never compete:
-  - CPU threads own slots `[0, threads-1]`
-  - GPU (if active) owns slot `threads`
-- Stride formula: `nonce = minerID * slotsPerMiner + threadSlot`,
-  stepping by `slotsPerMiner * totalMiners` (where `slotsPerMiner =
-  threads + (1 if GPU else 0)`).
-- Validation: the miner exits with a clear error if `minerID >= totalMiners`.
+- **Protocol:** [Stratum v1](https://en.bitcoin.it/wiki/Stratum_mining_protocol)
+  (JSON-RPC over TCP). Yespower 1.0 shares the same block header and
+  share-target structure as Bitcoin, so standard Stratum flows apply.
+- **Template → job mapping:** Subscribe (`mining.subscribe`), authorize
+  (`mining.authorize`), receive jobs (`mining.notify`), submit shares
+  (`mining.submit`).
+- **Extranonce:** LegacyCoin uses the same 32-bit nonce field in the
+  block header. Stratum's extranonce/extranonce2 pattern works as-is.
+- **Share difficulty:** The pool sends a per-job `nbits` target; shares
+  below pool difficulty are submitted but below the network target are
+  not valid blocks. The miner should check both.
+- **Reconnection:** Exponential backoff with jitter (like the RPC poller),
+  preserve subscription state across reconnect.
+- **TUI integration:** Reuse `templateState` and `statsCh` — treat each
+  `mining.notify` as a new template, submit shares through the same path.
 
-### Template Pipeline
+### Stratum vs RPC mode differences
 
-- Background goroutine polls `getblocktemplate` every 500 ms, stores the
-  latest block header in `tmplState`.
-- When a block is submitted, a `pollTrigger` channel signals the background
-  poller to fetch the next template immediately (~0 ms gap) instead of
-  waiting for the next 500 ms tick.
-- This eliminates idle time between blocks — especially important when
-  multiple miners share one RPC endpoint.
+| Concern                | RPC (solo)                   | Stratum (pool)                    |
+| ---------------------- | ---------------------------- | --------------------------------- |
+| Template source        | HTTP `getblocktemplate`      | TCP `mining.notify`               |
+| Submit path            | HTTP `submitblock`           | TCP `mining.submit`               |
+| Share target           | Network bits from template   | Per-job `nbits` from pool         |
+| Connection             | Short-lived HTTP             | Long-lived TCP, keepalive         |
+| Auth                   | Cookie or user/pass          | `mining.authorize` + worker name  |
+| Extra nonce            | None (single 32-bit nonce)   | Extranonce + extranonce2          |
 
-### Fast PoW Check (Hot Path)
+### Priority
 
-- `CheckProofOfWork` (which allocates big.Int per hash) is called once per
-  template to produce a `[32]byte` target via `TargetFromBits`.
-- The inner mining loop uses `CheckHashTarget`, which compares 32 bytes
-  directly with no allocations — zero garbage per hash in the hot path.
+Highest — unlocks pooled mining, the most requested feature.
 
-### GPU Mining
+---
 
-- CUDA or OpenCL backend, selected by build tag
-- One thread per nonce, ~8 MB scratch per thread in global memory
-- Batch size auto-sized to 80% of GPU free memory
-- `gpu.Miner` interface: `New()`, `Hash(batch)`, `Close()`
-- Full yespower 1.0 kernel implemented for both CUDA and OpenCL
-  (SHA256, Salsa20/8, pwxform, smix1/smix2)
-- TUI shows GPU devices when `--gpu` is active
+## CPU Assembly / Performance Features
 
-### Config File
+The yespower C reference provides several code paths, but the Go/CGO
+interface itself has room for optimization.
 
-- JSON file read before flag parsing; CLI flags override config values.
-- Supported keys: `rpc`, `pubkeyhash`, `threads`, `rpcuser`, `rpcpass`,
-  `datadir`, `rig`, `gpu`, `miner_id`, `total_miners`, `testnet`.
+### 1. Auto-detected ISA dispatch at runtime
 
-## Performance
+Currently the code path is fixed at compile time (`make` / `make avx2` /
+`make native` / `make purec`). A runtime CPUID check could select the
+best path without needing separate binaries:
 
-| Variant               | Single-thread | Notes                    |
-| --------------------- | ------------- | ------------------------ |
-| baseline (x86-64 ASM) | 27 H/s        | i7-1265U                 |
-| avx2                  | 21 H/s        | throttles on laptop      |
-| native                | 26 H/s        | —                        |
-| GPU (RTX 3060, est.)  | ~100–300 H/s  | depends on mem bandwidth |
+- `cpuid` detects AVX2, AVX-512VL, AVX-512BW, VAES, etc.
+- A function-pointer table dispatches to the appropriate `pwxform` / smix
+  variant.
+- Already implemented in yespower-opt.c via `cpuid()` — but the Go build
+  always includes the `#define`-selected path. Making it selectable at
+  startup would require compiling multiple object variants and loading
+  via build tags or dlopen.
 
-## TODO
+### 2. ARM64 / NEON / SVE
 
-1. Stratum protocol client (press `b` in TUI to switch)
-2. Windows/macOS system resource monitoring (non-Linux `/proc`)
-3. GPU kernel optimization (shared memory pwxform, warp-cooperative SMix)
-4. CPU auto-detect: `make detect` target that reads `/proc/cpuinfo` and
-   recommends optimal CGO_CFLAGS
-5. ASUS/PCIe reset recovery for GPU hangs
+Yespower has no upstream ARM64 SIMD path. The C reference uses x86-64
+inline assembly for `pwxform`. An ARM64 port would need:
+
+- NEON-based `pwxform` (16× S-box lookup interleaved with SHA256).
+- SVE (Scalable Vector Extension) variant if available.
+- Verified against the reference C implementation.
+
+### 3. Pure-Go backend performance
+
+The `PooledYespower` (pure-Go experimental) backend currently achieves
+~2 H/s — too slow for real mining but useful for validation. Potential
+improvements:
+
+- Hand-tuned SHA256 with unsafe pointer arithmetic (avoids `hash.Hash`
+  interface overhead).
+- Fixed-size stack allocations instead of heap-allocated scratch (~8 MB
+  per hash, avoid GC pressure).
+- Copy-on-write scratch pool: the pure-Go PooledYespower already reuses
+  scratch from a sync.Pool. Further gains come from inlining the Salsa20
+  and pwxform cores.
+
+### 4. CGO call overhead reduction
+
+Each `HashHeaderRaw` call crosses the Go/C boundary. Batching multiple
+nonces into a single C call (similar to the GPU batch approach) could
+amortize overhead:
+
+- Submit a buffer of N headers to C, get N hashes back.
+- Requires changes in yespower-opt.c (or a new entry point).
+- Gains are likely <10 % since each hash already takes ~30 ms in C.
+
+### 5. Shared-memory pwxform for GPU
+
+Current GPU kernels place the 8 MB scratch in global memory. A
+warp-cooperative smix that loads the S-box into shared memory can
+reduce latency:
+
+- Requires `__shared__` pwxform table, rotated through warps.
+- Limited to GPUs with enough shared memory (≥48 KB per block).
+- Could 2–3× GPU hashrate on cards with ample shared memory (e.g.,
+  Turing+).
+
+### Priority
+
+| Item                          | Effort | Impact   |
+| ----------------------------- | ------ | -------- |
+| Runtime ISA dispatch          | Medium | Medium   |
+| ARM64 NEON                    | Large  | High     |
+| Pure-Go optimization          | Medium | Low–Med  |
+| CGO batching                  | Small  | Low      |
+| GPU shared-memory pwxform     | Large  | High     |

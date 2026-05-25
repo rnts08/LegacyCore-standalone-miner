@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go 1.21+**
+- **Go 1.25+** — see `go.mod` for the exact toolchain version
 - **C compiler** (gcc/clang) — required for the optimized yespower CGO backend
 - A running **legacywallet** / **legacycoind** daemon with RPC enabled (for solo mining)
 - **Optional:** CUDA toolkit (`nvcc`) for GPU mining on NVIDIA GPUs
@@ -12,7 +12,10 @@
 
 ## 1. Build the Miner
 
-Before you begin building the miner, make sure that you have the LegacyCore miner compiled and installed on your system, follow the instructions on [GitHub - legacybtc/LegacyCore: Legacy Core — full node, CLI, and desktop wallet source for Legacy Coin (LBTC), a fair-launch Proof-of-Work UTXO network. · GitHub](https://github.com/legacybtc/LegacyCore) since the stand-alone miner currently only support rpc connection and is using the cookie to validate with the legacycored RPC daemon.
+Before you begin building the miner, make sure that you have the LegacyCore daemon
+compiled and installed on your system. Follow the instructions at
+[legacybtc/LegacyCore](https://github.com/legacybtc/LegacyCore) — the standalone
+miner connects via RPC using cookie auth.
 
 ```bash
 cd standalone-miner
@@ -42,6 +45,12 @@ make opencl    # AMD/Intel — requires OpenCL runtime
 ```
 
 Output: `./legacy-miner`.
+
+### Project Structure
+
+The entry point is at `cmd/legacy-miner/main.go`. All application logic lives
+in `internal/app/` as a single `app` package. The build system handles this
+transparently — you only need `make` or `go build ./cmd/legacy-miner`.
 
 ---
 
@@ -129,7 +138,7 @@ Run multiple miner processes against the same daemon without duplicating work:
 ./legacy-miner --config=miner3.json
 ```
 
-Each miner gets a disjoint slice of the 32-bit nonce space.  CPU threads
+Each miner gets a disjoint slice of the 32-bit nonce space. CPU threads
 and GPU (if enabled) within the same process also get separate slots so
 they never compete.
 
@@ -183,7 +192,7 @@ they never compete.
 
 ## 5. Config File
 
-A JSON config file sets flag defaults.  CLI flags override config values.
+A JSON config file sets flag defaults. CLI flags override config values.
 Example `miner.json`:
 
 ```json
@@ -203,7 +212,7 @@ Supported keys: `rpc`, `pubkeyhash`, `threads`, `rpcuser`, `rpcpass`,
 `datadir`, `rig`, `gpu`, `miner_id`, `total_miners`, `testnet`.
 
 **Tip for multi-instance:** create one JSON file per miner, varying only
-`rig`, `miner_id`, and optionally `threads`.  Then launch with
+`rig`, `miner_id`, and optionally `threads`. Then launch with
 `--config=minerN.json`.
 
 ---
@@ -383,7 +392,7 @@ driver overhead. **Benchmark with `--gpu` on your hardware.**
 
 ## 8. Multi-Machine (Distributed) Mining
 
-Point multiple miners at the same daemon RPC endpoint.  Each miner must
+Point multiple miners at the same daemon RPC endpoint. Each miner must
 have a unique `--miner-id` in `[0, totalMiners-1]`:
 
 ```bash
@@ -409,8 +418,8 @@ Or use config files for cleaner management:
 ```
 
 Each miner calls `getblocktemplate` independently, searches a disjoint
-nonce range, and submits when found.  After submission the background
-template poller is triggered immediately (no 500 ms wait).  The hot-path
+nonce range, and submits when found. After submission the background
+template poller is triggered immediately (no 500 ms wait). The hot-path
 PoW check uses direct byte comparison instead of big.Int allocation.
 
 ---
