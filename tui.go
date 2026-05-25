@@ -20,12 +20,12 @@ import (
 	"github.com/legacycoin/standalone-miner/internal/pow"
 	"github.com/legacycoin/standalone-miner/internal/wire"
 
-	"github.com/charmbracelet/bubbletea"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 const (
-	maxHist = 60
+	maxHist = 55
 )
 
 var barRunes = []rune("▁▂▃▄▅▆▇█")
@@ -78,14 +78,14 @@ type templateState struct {
 }
 
 type model struct {
-	rigName string
-	pers    string
+	rigName         string
+	pers            string
 	postGenesisBits uint32
-	backend string
+	backend         string
 
-	mode       modeType
-	threads    int
-	minerID    uint32
+	mode        modeType
+	threads     int
+	minerID     uint32
 	totalMiners uint32
 
 	rpcURL    string
@@ -110,7 +110,7 @@ type model struct {
 	memMB      float64
 	startTime  time.Time
 
-	count      *sharedCount
+	count        *sharedCount
 	miningCtx    context.Context
 	miningCancel context.CancelFunc
 	statsCh      chan statsMsg
@@ -123,7 +123,7 @@ type model struct {
 	gpuHistory  []float64
 	gpuActive   atomic.Bool
 
-	tmplState  *templateState
+	tmplState   *templateState
 	pollTrigger chan struct{}
 }
 
@@ -139,16 +139,16 @@ func initialModel() model {
 		pers:            pers,
 		postGenesisBits: chaincfg.MainNet.PostGenesisBits,
 		backend:         pow.BackendName(),
-		mode:        modeBench,
-		threads:     runtime.NumCPU(),
-		totalMiners: 1,
-		history:     make([]float64, 0, maxHist),
-		gpuHistory:  make([]float64, 0, maxHist),
-		statsCh:     make(chan statsMsg, 64),
-		startTime:   time.Now(),
-		count:       &sharedCount{},
-		tmplState:   &templateState{},
-		pollTrigger: make(chan struct{}, 1),
+		mode:            modeBench,
+		threads:         runtime.NumCPU(),
+		totalMiners:     1,
+		history:         make([]float64, 0, maxHist),
+		gpuHistory:      make([]float64, 0, maxHist),
+		statsCh:         make(chan statsMsg, 64),
+		startTime:       time.Now(),
+		count:           &sharedCount{},
+		tmplState:       &templateState{},
+		pollTrigger:     make(chan struct{}, 1),
 	}
 	m.miningCtx, m.miningCancel = context.WithCancel(context.Background())
 	return m
@@ -783,12 +783,12 @@ func fmtDuration(d time.Duration) string {
 }
 
 var (
-	styleTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	styleLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styleValue  = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	styleOK     = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
-	styleWarn   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	styleBox    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
+	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	styleLabel = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	styleValue = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	styleOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("82"))
+	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	styleBox   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(0, 1)
 )
 
 func modeIndicator(m model) string {
@@ -859,13 +859,13 @@ func (m model) View() string {
 
 	var b strings.Builder
 
-	b.WriteString("┌" + strings.Repeat("─", width-2) + "┐\n")
+	b.WriteString("┌" + strings.Repeat("─", width) + "┐\n")
 	b.WriteString(boxLine(
 		styleTitle.Render("LegacyCoin Miner")+"  —  "+styleLabel.Render(m.rigName),
 		width,
 	))
 	b.WriteString("\n")
-	b.WriteString("│" + strings.Repeat("─", width-2) + "│\n")
+	b.WriteString("│" + strings.Repeat("─", width) + "│\n")
 
 	if hasGPU {
 		b.WriteString(boxLine(
@@ -912,7 +912,7 @@ func (m model) View() string {
 	))
 	b.WriteString("\n")
 
-	b.WriteString("│" + strings.Repeat("─", width-2) + "│\n")
+	b.WriteString("│" + strings.Repeat("─", width) + "│\n")
 
 	b.WriteString(boxLine(modeIndicator(m), width))
 	b.WriteString("\n")
@@ -926,12 +926,12 @@ func (m model) View() string {
 	b.WriteString(boxLine("uptime: "+fmtDuration(time.Since(m.startTime)), width))
 	b.WriteString("\n")
 
-	b.WriteString("│" + strings.Repeat("─", width-2) + "│\n")
+	b.WriteString("│" + strings.Repeat("─", width) + "│\n")
 
 	b.WriteString(boxLine(styleLabel.Render(helpLine), width))
 	b.WriteString("\n")
 
-	b.WriteString("└" + strings.Repeat("─", width-2) + "┘")
+	b.WriteString("└" + strings.Repeat("─", width) + "┘")
 
 	return b.String()
 }
