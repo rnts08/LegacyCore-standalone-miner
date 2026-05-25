@@ -71,7 +71,7 @@ type templateState struct {
 	mu       sync.Mutex
 	height   int
 	base     [80]byte
-	raw      [80]byte
+	raw      []byte
 	bits     uint32
 	stale    atomic.Bool
 	hasStale bool
@@ -439,7 +439,7 @@ func (m *model) runRPCLoop(ctx context.Context) {
 				m.tmplState.base = base
 				m.tmplState.bits = uint32(bits)
 				m.tmplState.height = tmpl.Height
-				copy(m.tmplState.raw[:], raw[:80])
+				m.tmplState.raw = raw
 				m.tmplState.stale.Store(true)
 				m.tmplState.hasStale = true
 			}

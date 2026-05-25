@@ -101,7 +101,7 @@ type BlockTemplate struct {
 	Bits        string `json:"bits"`
 	MerkleRoot  string `json:"merkleroot"`
 	Timestamp   uint32 `json:"time"`
-	TxCount     int    `json:"transactions"`
+	Transactions json.RawMessage `json:"transactions"`
 	MempoolSize int    `json:"mempoolsize"`
 	Hex         string `json:"hex"`
 }
