@@ -31,8 +31,12 @@ static:
 # ---- GPU targets (require CUDA toolkit or OpenCL runtime) ----
 
 # CUDA: compile bridge .o then build Go with cuda tag
+# -arch=native auto-detects the GPU; falls back to sm_61 (Pascal) if your
+# nvcc version does not support it (use -arch=sm_100 for Blackwell RTX 5000)
 cuda:
-	nvcc -arch=sm_61 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o
+	nvcc -arch=native -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
+	|| nvcc -arch=sm_100 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
+	|| nvcc -arch=sm_61 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o
 	go build -tags cuda -o $(BINARY) .
 
 # OpenCL: build Go with opencl tag (CGO compiles opencl_bridge.c)
