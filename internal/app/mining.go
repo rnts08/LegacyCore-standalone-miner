@@ -1,6 +1,7 @@
-package main
+package app
 
 import (
+	"context"
 	"encoding/binary"
 	"sync"
 	"sync/atomic"
@@ -76,4 +77,55 @@ func benchHashrate(hasher Hasher, base [80]byte, workers, sec int) float64 {
 	wg.Wait()
 
 	return float64(count.Load()) / time.Since(start).Seconds()
+}
+
+func mineBlockHashed(hasher Hasher, base [80]byte, target [32]byte, workers int, ctx context.Context, hashCount *atomic.Uint64, minerID, totalMiners, slotsPerMiner uint32, stale *atomic.Bool) (uint32, bool) {
+	type result struct {
+		nonce uint32
+	}
+	resc := make(chan result, 1)
+	var wg sync.WaitGroup
+
+	step := slotsPerMiner * totalMiners
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(start uint32) {
+			defer wg.Done()
+			var buf [80]byte
+			for nonce := minerID*slotsPerMiner + start; ; nonce += step {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if stale.Load() {
+					return
+				}
+				copy(buf[:], base[:])
+				binary.LittleEndian.PutUint32(buf[76:], nonce)
+				hash, err := hasher.HashHeaderRaw(buf[:])
+				if err != nil {
+					continue
+				}
+				hashCount.Add(1)
+				if consensus.CheckHashTarget(hash, &target) == nil {
+					select {
+					case resc <- result{nonce}:
+					default:
+					}
+					return
+				}
+			}
+		}(uint32(w))
+	}
+
+	go func() {
+		wg.Wait()
+		close(resc)
+	}()
+
+	for res := range resc {
+		return res.nonce, true
+	}
+	return 0, false
 }

@@ -20,18 +20,18 @@ ARG VERSION=dev
 
 # Build for linux/amd64 (native compiler)
 RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=1 CC=gcc \
-    go build -ldflags "-X main.version=${VERSION} -s -w" \
-    -o /build/linux-amd64/legacy-miner .
+    go build -ldflags "-X github.com/legacycoin/standalone-miner/cmd/legacy-miner.version=${VERSION} -s -w" \
+    -o /build/linux-amd64/legacy-miner ./cmd/legacy-miner
 
 # Build for linux/arm64
 RUN GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
-    go build -ldflags "-X main.version=${VERSION} -s -w" \
-    -o /build/linux-arm64/legacy-miner .
+    go build -ldflags "-X github.com/legacycoin/standalone-miner/cmd/legacy-miner.version=${VERSION} -s -w" \
+    -o /build/linux-arm64/legacy-miner ./cmd/legacy-miner
 
 # Build for windows/amd64
 RUN GOOS=windows GOARCH=amd64 CGO_ENABLED=1 CC=x86_64-w64-mingw32-gcc \
-    go build -ldflags "-X main.version=${VERSION} -s -w" \
-    -o /build/windows-amd64/legacy-miner.exe .
+    go build -ldflags "-X github.com/legacycoin/standalone-miner/cmd/legacy-miner.version=${VERSION} -s -w" \
+    -o /build/windows-amd64/legacy-miner.exe ./cmd/legacy-miner
 
 FROM scratch AS artifacts
 COPY --from=builder /build /

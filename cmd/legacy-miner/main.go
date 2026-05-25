@@ -1,20 +1,17 @@
 package main
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/legacycoin/standalone-miner/gpu"
+	"github.com/legacycoin/standalone-miner/internal/app"
 	"github.com/legacycoin/standalone-miner/internal/chaincfg"
-	"github.com/legacycoin/standalone-miner/internal/config"
-	"github.com/legacycoin/standalone-miner/internal/wire"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -173,86 +170,41 @@ func main() {
 		}
 	}
 
-	m := initialModel()
+	appCfg := app.Config{
+		Threads:     *threads,
+		MinerID:     uint32(*minerID),
+		TotalMiners: uint32(*totalMiners),
+		RPCURL:      *rpcURL,
+		RPCUser:     *rpcUser,
+		RPCPass:     *rpcPass,
+		DataDir:     *dataDir,
+		PubKeyHash:  *pubKeyHash,
+		RigName:     *rig,
+	}
+
 	if *testnet {
-		m.pers = chaincfg.TestNet.YespowerPers
-		m.postGenesisBits = chaincfg.TestNet.PostGenesisBits
+		appCfg.Pers = chaincfg.TestNet.YespowerPers
+		appCfg.PostGenesisBits = chaincfg.TestNet.PostGenesisBits
 	}
-	m.threads = *threads
-	m.minerID = uint32(*minerID)
-	m.totalMiners = uint32(*totalMiners)
-	m.rpcURL = *rpcURL
-	m.rpcUser = *rpcUser
-	m.rpcPass = *rpcPass
-	m.dataDir = *dataDir
-	m.pubKeyHex = *pubKeyHash
-	if *rig != "" {
-		m.rigName = *rig
-	}
+
 	if *rpcURL != "" {
-		m.mode = modeRPC
+		appCfg.Mode = app.ModeRPC
 	}
 
 	if *gpuEnable {
 		gm := gpu.New()
 		if gm.Available() {
-			m.gpuMiner = gm
+			appCfg.GPUMiner = gm
 			for _, d := range gm.Devices() {
-				m.gpuDevices = append(m.gpuDevices, d.Name)
-			}
-			if len(m.gpuDevices) > 0 {
-				m.gpuName = m.gpuDevices[0]
+				appCfg.GPUDevices = append(appCfg.GPUDevices, d.Name)
 			}
 		}
 	}
 
+	m := app.NewModel(appCfg)
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
-}
-
-func defaultDataDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".legacycoin")
-	}
-	return config.DefaultDataDir()
-}
-
-func newRPCClient(url, user, pass, dataDir string) *RPCClient {
-	if user == "" && pass == "" {
-		if dataDir == "" {
-			dataDir = defaultDataDir()
-		}
-		auth, err := config.LoadRPCCookieForDataDir(dataDir)
-		if err == nil && auth.Enabled {
-			user = auth.User
-			pass = auth.Password
-		}
-	}
-	if !strings.Contains(url, "://") {
-		url = "http://" + url
-	}
-	if user != "" {
-	}
-	return NewRPCClient(url, user, pass)
-}
-
-func parseBlockHeader(raw []byte) (wire.BlockHeader, error) {
-	if len(raw) < 80 {
-		return wire.BlockHeader{}, fmt.Errorf("block too short: %d bytes", len(raw))
-	}
-	var h wire.BlockHeader
-	h.Version = int32(binary.LittleEndian.Uint32(raw[0:4]))
-	copy(h.PrevBlock[:], raw[4:36])
-	copy(h.MerkleRoot[:], raw[36:68])
-	h.Timestamp = binary.LittleEndian.Uint32(raw[68:72])
-	h.Bits = binary.LittleEndian.Uint32(raw[72:76])
-	h.Nonce = binary.LittleEndian.Uint32(raw[76:80])
-	return h, nil
-}
-
-func writeNonce(raw []byte, nonce uint32) {
-	binary.LittleEndian.PutUint32(raw[76:80], nonce)
 }

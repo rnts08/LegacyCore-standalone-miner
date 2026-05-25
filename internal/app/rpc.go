@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -96,14 +96,14 @@ func (c *RPCClient) Call(method string, params []any) (json.RawMessage, error) {
 }
 
 type BlockTemplate struct {
-	Height      int    `json:"height"`
-	PrevHash    string `json:"previoushash"`
-	Bits        string `json:"bits"`
-	MerkleRoot  string `json:"merkleroot"`
-	Timestamp   uint32 `json:"time"`
+	Height      int              `json:"height"`
+	PrevHash    string           `json:"previoushash"`
+	Bits        string           `json:"bits"`
+	MerkleRoot  string           `json:"merkleroot"`
+	Timestamp   uint32           `json:"time"`
 	Transactions json.RawMessage `json:"transactions"`
-	MempoolSize int    `json:"mempoolsize"`
-	Hex         string `json:"hex"`
+	MempoolSize int              `json:"mempoolsize"`
+	Hex         string           `json:"hex"`
 }
 
 func (c *RPCClient) GetBlockTemplate(pubKeyHash string) (*BlockTemplate, error) {

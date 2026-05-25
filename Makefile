@@ -6,27 +6,27 @@ default: cpu
 
 # Baseline CGO — x86-64 ASM enabled but no -mavx2
 cpu:
-	go build -o $(BINARY) .
+	go build -o $(BINARY) ./cmd/legacy-miner
 
 # Enable AVX2 code path in yespower-opt.c (128-bit SIMD, 3-op instrs)
 avx2:
-	CGO_CFLAGS="-mavx2" go build -o $(BINARY) .
+	CGO_CFLAGS="-mavx2" go build -o $(BINARY) ./cmd/legacy-miner
 
 # Target this specific CPU
 native:
-	CGO_CFLAGS="-march=native" go build -o $(BINARY) .
+	CGO_CFLAGS="-march=native" go build -o $(BINARY) ./cmd/legacy-miner
 
 # Disable x86-64 inline ASM (force pure C path in yespower-opt.c)
 purec:
-	CGO_CFLAGS="-DNO_X86_64_ASM" go build -o $(BINARY) .
+	CGO_CFLAGS="-DNO_X86_64_ASM" go build -o $(BINARY) ./cmd/legacy-miner
 
 # Pure-Go fallback (no C at all)
 pure:
-	go build -tags $(PURE_TAG) -o $(BINARY) .
+	go build -tags $(PURE_TAG) -o $(BINARY) ./cmd/legacy-miner
 
 # Static binary (baseline)
 static:
-	CGO_ENABLED=1 go build -ldflags '-extldflags "-static"' -o $(BINARY)-static .
+	CGO_ENABLED=1 go build -ldflags '-extldflags "-static"' -o $(BINARY)-static ./cmd/legacy-miner
 
 # ---- GPU targets (require CUDA toolkit or OpenCL runtime) ----
 
@@ -37,11 +37,11 @@ cuda:
 	nvcc -arch=native -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
 	|| nvcc -arch=sm_100 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
 	|| nvcc -arch=sm_61 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o
-	go build -tags cuda -o $(BINARY) .
+	go build -tags cuda -o $(BINARY) ./cmd/legacy-miner
 
 # OpenCL: build Go with opencl tag (CGO compiles opencl_bridge.c)
 opencl:
-	go build -tags opencl -o $(BINARY) .
+	go build -tags opencl -o $(BINARY) ./cmd/legacy-miner
 
 # Clean GPU build artifacts
 gpu-clean:
