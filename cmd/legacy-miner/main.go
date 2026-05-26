@@ -16,7 +16,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-var version = "v1.2.1"
+var version = "v1.2.2"
 
 type minerFileConfig struct {
 	RPC         string `json:"rpc,omitempty"`
