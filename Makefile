@@ -31,11 +31,17 @@ static:
 # ---- GPU targets (require CUDA toolkit or OpenCL runtime) ----
 
 # CUDA: compile bridge .o then build Go with cuda tag
-# -arch=native auto-detects the GPU; falls back to sm_61 (Pascal) if your
-# nvcc version does not support it (use -arch=sm_100 for Blackwell RTX 5000)
+# -arch=native auto-detects the GPU; falls back through known compute caps:
+#   sm_100 (Blackwell), sm_90 (Hopper), sm_89 (Ada/RX 4060),
+#   sm_86 (Ampere/RX 3090), sm_75 (Turing/Quadro RTX 5000),
+#   sm_70 (Volta), sm_61 (Pascal)
 cuda:
 	nvcc -arch=native -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
 	|| nvcc -arch=sm_100 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
+	|| nvcc -arch=sm_90 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
+	|| nvcc -arch=sm_86 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
+	|| nvcc -arch=sm_75 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
+	|| nvcc -arch=sm_70 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o 2>/dev/null \
 	|| nvcc -arch=sm_61 -O3 -c $(GPU_DIR)/cuda_bridge.cu -o $(GPU_DIR)/cuda_bridge.o
 	go build -tags cuda -o $(BINARY) ./cmd/legacy-miner
 

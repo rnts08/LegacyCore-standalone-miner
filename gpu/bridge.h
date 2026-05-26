@@ -31,6 +31,9 @@ int gpu_hash(const uint8_t *headers, uint8_t *outputs, int count,
 /* Release GPU resources. */
 void gpu_close(void);
 
+/* Return the last CUDA error message (valid until next GPU API call). */
+const char *gpu_error_string(void);
+
 /* Maximum batch size (limited by GPU memory).  Set by gpu_init(). */
 extern int gpu_max_batch;
 

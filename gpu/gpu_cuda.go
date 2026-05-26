@@ -42,9 +42,14 @@ func gpuHash(headers []byte, outputs []byte, count int, pers string) error {
 
 	rc := C.gpu_hash(cHeaders, cOutputs, C.int(count), cPers, C.int(len(pers)))
 	if rc != 0 {
-		return fmt.Errorf("gpu_hash failed: %d", rc)
+		errStr := C.GoString(C.gpu_error_string())
+		return fmt.Errorf("gpu_hash failed: %s", errStr)
 	}
 	return nil
+}
+
+func gpuLastError() string {
+	return C.GoString(C.gpu_error_string())
 }
 
 func gpuClose() {

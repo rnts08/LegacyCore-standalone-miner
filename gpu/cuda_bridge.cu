@@ -325,7 +325,7 @@ __device__ void yespower_hash_d(const uint8_t *input, size_t inputlen,
     memcpy(B,B128,B_SIZE);
     uint8_t sha256_save[32]; memcpy(sha256_save,B,32);
     uint64_t *V=(uint64_t*)Vb, *XY=(uint64_t*)XYb;
-    uint32_t Nloop_rw=((N+2)/3)&~(uint32_t)1;
+    uint32_t Nloop_rw=(N+2)/3; Nloop_rw++; Nloop_rw&=~(uint32_t)1;
     smix1_p2_d(B,1,Sbytes/128,V,XY,S0,S1,S2,&w,1);
     smix1_p2_d(B,R,N,V,XY,S0,S1,S2,&w,0);
     smix2_p2_d(B,R,N,Nloop_rw,V,XY,S0,S1,S2,&w);
@@ -355,19 +355,40 @@ int gpu_max_batch = 0;
 static uint8_t *d_scratch = NULL, *d_headers = NULL, *d_outputs = NULL, *d_pers = NULL;
 static int pers_cap = 0;
 static int initialized = 0;
+static char gpu_last_error[256];
 
 extern "C" {
 
+static void set_last_error(cudaError_t err, const char *msg) {
+    snprintf(gpu_last_error, sizeof(gpu_last_error), "%s: %s",
+             msg, cudaGetErrorString(err));
+}
+
+static void set_last_error_str(const char *msg) {
+    snprintf(gpu_last_error, sizeof(gpu_last_error), "%s", msg);
+}
+
 int gpu_init(void) {
     cudaError_t err;
+    gpu_last_error[0] = '\0';
+
     err = cudaGetDeviceCount(&gpu_dev_count);
-    if (err != cudaSuccess || gpu_dev_count < 1) return -1;
+    if (err != cudaSuccess || gpu_dev_count < 1) {
+        set_last_error(err, "cudaGetDeviceCount");
+        return -1;
+    }
     err = cudaSetDevice(0);
-    if (err != cudaSuccess) return -1;
+    if (err != cudaSuccess) {
+        set_last_error(err, "cudaSetDevice");
+        return -1;
+    }
 
     size_t free_mem, total_mem;
     err = cudaMemGetInfo(&free_mem, &total_mem);
-    if (err != cudaSuccess) return -1;
+    if (err != cudaSuccess) {
+        set_last_error(err, "cudaMemGetInfo");
+        return -1;
+    }
 
     size_t usable = free_mem * 8 / 10;
     gpu_max_batch = (int)(usable / PER_THREAD);
@@ -376,11 +397,20 @@ int gpu_init(void) {
 
     size_t scratch_sz = (size_t)gpu_max_batch * PER_THREAD;
     err = cudaMalloc(&d_scratch, scratch_sz);
-    if (err != cudaSuccess) goto fail;
+    if (err != cudaSuccess) { set_last_error(err, "cudaMalloc scratch"); goto fail; }
     err = cudaMalloc(&d_headers, (size_t)gpu_max_batch * 80);
-    if (err != cudaSuccess) goto fail;
+    if (err != cudaSuccess) { set_last_error(err, "cudaMalloc headers"); goto fail; }
     err = cudaMalloc(&d_outputs, (size_t)gpu_max_batch * 32);
-    if (err != cudaSuccess) goto fail;
+    if (err != cudaSuccess) { set_last_error(err, "cudaMalloc outputs"); goto fail; }
+
+    {
+        cudaDeviceProp prop;
+        cudaGetDeviceProperties(&prop, 0);
+        snprintf(gpu_last_error, sizeof(gpu_last_error),
+                 "GPU %s  CC %d.%d  batch=%d  scratch=%zu MB",
+                 prop.name, prop.major, prop.minor,
+                 gpu_max_batch, scratch_sz / 1048576);
+    }
 
     initialized = 1;
     return gpu_dev_count;
@@ -403,31 +433,41 @@ int gpu_device_info(int device_id, char *name, size_t name_size, size_t *global_
 
 int gpu_hash(const uint8_t *headers, uint8_t *outputs, int count,
              const uint8_t *pers, int perslen) {
-    if (!initialized) return -1;
+    if (!initialized) {
+        set_last_error_str("not initialized");
+        return -1;
+    }
     if (count > gpu_max_batch) count = gpu_max_batch;
+    if (count < 1) {
+        set_last_error_str("count < 1");
+        return -1;
+    }
     cudaError_t err;
 
     err = cudaMemcpy(d_headers, headers, (size_t)count * 80, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) return -1;
+    if (err != cudaSuccess) { set_last_error(err, "cudaMemcpy H2D headers"); return -1; }
 
     if (perslen + 1 > pers_cap) {
         if (d_pers) cudaFree(d_pers);
         pers_cap = perslen + 1;
         err = cudaMalloc(&d_pers, pers_cap);
-        if (err != cudaSuccess) return -1;
+        if (err != cudaSuccess) { set_last_error(err, "cudaMalloc pers"); return -1; }
     }
     err = cudaMemcpy(d_pers, pers, perslen, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) return -1;
+    if (err != cudaSuccess) { set_last_error(err, "cudaMemcpy H2D pers"); return -1; }
 
     dim3 blockDim(256,1,1);
     dim3 gridDim((count+255)/256,1,1);
     yespower_kernel<<<gridDim,blockDim>>>(d_headers, d_outputs, count, d_pers, perslen, d_scratch);
 
+    err = cudaGetLastError();
+    if (err != cudaSuccess) { set_last_error(err, "kernel launch"); return -1; }
+
     err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) return -1;
+    if (err != cudaSuccess) { set_last_error(err, "kernel execution"); return -1; }
 
     err = cudaMemcpy(outputs, d_outputs, (size_t)count * 32, cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) return -1;
+    if (err != cudaSuccess) { set_last_error(err, "cudaMemcpy D2H outputs"); return -1; }
     return 0;
 }
 
@@ -437,6 +477,10 @@ void gpu_close(void) {
     if (d_outputs) { cudaFree(d_outputs); d_outputs = NULL; }
     if (d_pers)    { cudaFree(d_pers);    d_pers = NULL; }
     pers_cap = 0; initialized = 0; gpu_max_batch = 0;
+}
+
+const char *gpu_error_string(void) {
+    return gpu_last_error;
 }
 
 } /* extern "C" */
