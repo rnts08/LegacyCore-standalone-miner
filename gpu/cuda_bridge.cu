@@ -322,7 +322,7 @@ __device__ void yespower_hash_d(const uint8_t *input, size_t inputlen,
     uint8_t sha256_digest[32];
     sha256_hash_d(input,inputlen,sha256_digest);
     uint8_t B128[128]; pbkdf2_sha256_1_d(sha256_digest,32,pers,perslen,B128,128);
-    memcpy(B,B128,B_SIZE);
+    memcpy(B,B128,128);
     uint8_t sha256_save[32]; memcpy(sha256_save,B,32);
     uint64_t *V=(uint64_t*)Vb, *XY=(uint64_t*)XYb;
     uint32_t Nloop_rw=(N+2)/3; Nloop_rw++; Nloop_rw&=~(uint32_t)1;
@@ -393,7 +393,7 @@ int gpu_init(void) {
     size_t usable = free_mem * 8 / 10;
     gpu_max_batch = (int)(usable / PER_THREAD);
     if (gpu_max_batch < 1) gpu_max_batch = 1;
-    if (gpu_max_batch > 2048) gpu_max_batch = 2048;
+    if (gpu_max_batch > 256) gpu_max_batch = 256;
 
     size_t scratch_sz = (size_t)gpu_max_batch * PER_THREAD;
     err = cudaMalloc(&d_scratch, scratch_sz);
@@ -477,6 +477,13 @@ void gpu_close(void) {
     if (d_outputs) { cudaFree(d_outputs); d_outputs = NULL; }
     if (d_pers)    { cudaFree(d_pers);    d_pers = NULL; }
     pers_cap = 0; initialized = 0; gpu_max_batch = 0;
+}
+
+int gpu_reset(void) {
+    gpu_close();
+    cudaDeviceReset();
+    gpu_last_error[0] = '\0';
+    return gpu_init();
 }
 
 const char *gpu_error_string(void) {

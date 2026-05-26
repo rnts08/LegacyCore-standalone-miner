@@ -34,6 +34,9 @@ void gpu_close(void);
 /* Return the last CUDA error message (valid until next GPU API call). */
 const char *gpu_error_string(void);
 
+/* Reset GPU context (re-init after timeout/error to recover). */
+int gpu_reset(void);
+
 /* Maximum batch size (limited by GPU memory).  Set by gpu_init(). */
 extern int gpu_max_batch;
 

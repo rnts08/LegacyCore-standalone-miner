@@ -12,6 +12,8 @@ func gpuHash(_ []byte, _ []byte, _ int, _ string) error {
 	return errNoGPU
 }
 
+func gpuReset() int { return 0 }
+
 func gpuClose() {}
 
 var errNoGPU = &errNoGPUBackend{}

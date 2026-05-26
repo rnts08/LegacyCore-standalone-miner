@@ -221,6 +221,11 @@ int gpu_hash(const uint8_t *headers, uint8_t *outputs, int count,
     return 0;
 }
 
+int gpu_reset(void) {
+    gpu_close();
+    return gpu_init();
+}
+
 void gpu_close(void) {
     if (d_scratch) clReleaseMemObject(d_scratch);
     if (d_headers) clReleaseMemObject(d_headers);

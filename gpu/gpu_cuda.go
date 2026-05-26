@@ -52,6 +52,11 @@ func gpuLastError() string {
 	return C.GoString(C.gpu_error_string())
 }
 
+func gpuReset() int {
+	n := C.gpu_reset()
+	return int(n)
+}
+
 func gpuClose() {
 	C.gpu_close()
 }

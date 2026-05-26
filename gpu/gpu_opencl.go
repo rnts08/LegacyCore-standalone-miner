@@ -48,6 +48,11 @@ func gpuHash(headers []byte, outputs []byte, count int, pers string) error {
 	return nil
 }
 
+func gpuReset() int {
+	n := C.gpu_reset()
+	return int(n)
+}
+
 func gpuClose() {
 	C.gpu_close()
 }

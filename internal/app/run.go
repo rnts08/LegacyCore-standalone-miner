@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -88,10 +89,6 @@ func (m *Model) runGPUBenchLoop(ctx context.Context) {
 	if gm == nil {
 		return
 	}
-	batchSize := gm.MaxBatch()
-	if batchSize < 1 {
-		batchSize = 256
-	}
 	header := wire.BlockHeader{
 		Version:   1,
 		PrevBlock: [32]byte{},
@@ -103,6 +100,10 @@ func (m *Model) runGPUBenchLoop(ctx context.Context) {
 	slotsPerMiner := gpuSlot + 1
 	step := slotsPerMiner * m.totalMiners
 	nonce := m.minerID*slotsPerMiner + gpuSlot
+	batchSize := gm.MaxBatch()
+	if batchSize < 1 {
+		batchSize = 256
+	}
 	headers := make([][80]byte, batchSize)
 	m.gpuActive.Store(true)
 	for {
@@ -123,6 +124,13 @@ func (m *Model) runGPUBenchLoop(ctx context.Context) {
 		_, err := gm.Hash(headers, m.pers)
 		if err != nil {
 			m.gpuActive.Store(false)
+			fmt.Fprintf(os.Stderr, "GPU error: %v — resetting\n", err)
+			gm.Reset()
+			batchSize = gm.MaxBatch()
+			if batchSize < 1 {
+				batchSize = 256
+			}
+			headers = make([][80]byte, batchSize)
 			time.Sleep(time.Second)
 			continue
 		}
@@ -136,17 +144,17 @@ func (m *Model) runRPCGPULoop(ctx context.Context) {
 	if gm == nil {
 		return
 	}
-	batchSize := gm.MaxBatch()
-	if batchSize < 1 {
-		batchSize = 256
-	}
-	headers := make([][80]byte, batchSize)
 	client := newRPCClient(m.rpcURL, m.rpcUser, m.rpcPass, m.dataDir)
 	if client == nil {
 		return
 	}
 
 	m.gpuActive.Store(true)
+	batchSize := gm.MaxBatch()
+	if batchSize < 1 {
+		batchSize = 256
+	}
+	headers := make([][80]byte, batchSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -182,6 +190,13 @@ func (m *Model) runRPCGPULoop(ctx context.Context) {
 		results, err := gm.Hash(headers, m.pers)
 		if err != nil {
 			m.gpuActive.Store(false)
+			fmt.Fprintf(os.Stderr, "GPU error: %v — resetting\n", err)
+			gm.Reset()
+			batchSize = gm.MaxBatch()
+			if batchSize < 1 {
+				batchSize = 256
+			}
+			headers = make([][80]byte, batchSize)
 			select {
 			case <-time.After(time.Second):
 			case <-ctx.Done():
@@ -193,6 +208,9 @@ func (m *Model) runRPCGPULoop(ctx context.Context) {
 		m.gpuCount.Add(uint64(batchSize))
 
 		for i, hash := range results {
+			if m.tmplState.stale.Load() {
+				break
+			}
 			if consensus.CheckProofOfWork(chainhash.Hash(hash), bits) == nil {
 				nonceFound := binary.LittleEndian.Uint32(headers[i][76:])
 				m.tmplState.mu.Lock()

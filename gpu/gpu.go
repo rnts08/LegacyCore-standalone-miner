@@ -52,6 +52,26 @@ func (m *Miner) Devices() []DeviceInfo { return m.devices }
 // MaxBatch returns the maximum batch size (limited by GPU memory).
 func (m *Miner) MaxBatch() int { return m.maxBatch }
 
+// Reset resets the GPU device (recovery after timeout/error).
+func (m *Miner) Reset() {
+	m.available = false
+	m.devices = nil
+	m.maxBatch = 0
+	count := gpuReset()
+	if count > 0 {
+		for i := 0; i < count; i++ {
+			di := DeviceInfo{}
+			var mem uint64
+			if gpuDeviceInfo(i, &di.Name, &mem) == 0 {
+				di.GlobalMem = mem
+				m.devices = append(m.devices, di)
+			}
+		}
+		m.maxBatch = gpuMaxBatch()
+		m.available = count > 0
+	}
+}
+
 // Hash submits a batch of block headers (each 80 bytes) to the GPU
 // and returns the resulting hashes.
 // headers — slice of [count][80]byte serialized headers.
