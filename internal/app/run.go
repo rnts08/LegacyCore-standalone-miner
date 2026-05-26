@@ -375,6 +375,10 @@ func (m *Model) runRPCLoop(ctx context.Context) {
 		default:
 		}
 
+		m.tmplState.mu.Lock()
+		m.tmplState.hasStale = false
+		m.tmplState.mu.Unlock()
+
 		select {
 		case m.statsCh <- statsMsg{
 			found:    m.found,
